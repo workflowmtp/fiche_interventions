@@ -76,7 +76,7 @@ function App() {
               path="/"
               element={
                 <ProtectedRoute>
-                  <Home />
+                  <InterventionsListe />
                 </ProtectedRoute>
               }
             />
