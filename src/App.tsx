@@ -16,6 +16,7 @@ import { useAuth } from './hooks/useAuth';
 import { Toaster } from 'react-hot-toast';
 import UserInterventionsList from './components/UserInterventionsList';
 import InterventionsListe from './components/InterventionListe';
+import CreateIntervention from './components/CreateIntervention';
 
 function App() {
   const { user, loading, isAdmin } = useAuth();
@@ -41,13 +42,14 @@ function App() {
             <Route path="/reset-password" element={user ? (isAdmin ? <Navigate to="/admin/interventions" /> : <Navigate to="/" />) : <ResetPassword />} />
             
             {/* Admin Routes */}
-            <Route path="/interventions" element={<InterventionsListe />} />
+            <Route path="/interventions" element={<><Navbar/> <InterventionsListe /></>} />
             <Route path="/admin/login" element={user ? (isAdmin ? <Navigate to="/admin/interventions" /> : <Navigate to="/" />) : <AdminLogin />} />
             <Route path="/admin/register" element={user ? (isAdmin ? <Navigate to="/admin/interventions" /> : <Navigate to="/" />) : <AdminRegister />} />
             <Route
               path="/admin/interventions"
               element={
                 <AdminRoute>
+                   <Navbar/>
                   <InterventionsList />
                 </AdminRoute>
               }
@@ -56,6 +58,7 @@ function App() {
               path="/admin/machines"
               element={
                 <AdminRoute>
+                   <Navbar/>
                   <MachinesList />
                 </AdminRoute>
               }
@@ -66,6 +69,7 @@ function App() {
               path="/interventions/:id"
               element={
                 <ProtectedRoute>
+                   <Navbar/>
                   <EditIntervention />
                 </ProtectedRoute>
               }
@@ -76,6 +80,7 @@ function App() {
               path="/"
               element={
                 <ProtectedRoute>
+                  <Navbar/>
                   <InterventionsListe />
                 </ProtectedRoute>
               }
@@ -84,7 +89,8 @@ function App() {
               path="/intervention/new/"
               element={
                 <ProtectedRoute>
-                  <Home />
+                   <Navbar/>
+                  <CreateIntervention />
                 </ProtectedRoute>
               }
             />
