@@ -181,7 +181,7 @@ const InterventionsListe = () => {
   };
 
   const handleNewIntervention = () => {
-    navigate('/');
+    navigate('/intervention/new/');
   };
 
   const handleEditIntervention = (id: string) => {

@@ -32,7 +32,7 @@ function App() {
     <Router>
       <div className="min-h-screen bg-gray-50">
         <Toaster position="top-right" />
-        {!window.location.pathname.includes('/auth') && <Navbar />}
+        {!window.location.pathname.includes('/auth')}
         <div className="py-6">
           <Routes>
             {/* Auth Routes */}
@@ -80,7 +80,16 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/intervention/new/"
+              element={
+                <ProtectedRoute>
+                  <Home />
+                </ProtectedRoute>
+              }
+            />
           </Routes>
+          
         </div>
       </div>
     </Router>
