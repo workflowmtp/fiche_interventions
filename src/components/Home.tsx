@@ -144,23 +144,32 @@ const Home = () => {
       toast.error('Vous devez être connecté pour mettre en pause une intervention');
       return;
     }
-
+  
     const now = new Date();
     setIsPaused(true);
     
+    // Vérifier que formData.timeEntries existe, sinon initialiser comme tableau vide
+    const currentTimeEntries = formData.timeEntries || [];
+    
     const newTimeEntries = [
-      ...formData.timeEntries,
+      ...currentTimeEntries,
       { action: 'pause', timestamp: now.toISOString() }
     ];
     
     setFormData(prev => ({ ...prev, timeEntries: newTimeEntries }));
     
     try {
-      await saveIntervention(user.uid, { ...formData, timeEntries: newTimeEntries });
+      // S'assurer qu'un ID valide existe pour l'intervention
+      // Si c'est une nouvelle intervention qui n'a pas encore été sauvegardée,
+      // il faut d'abord la sauvegarder avant de mettre à jour les timeEntries
+      const interventionData = { ...formData, timeEntries: newTimeEntries };
+      await saveIntervention(user.uid, interventionData);
       toast.success('Intervention mise en pause');
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving intervention:', error);
-      toast.error(error.message || 'Erreur lors de la sauvegarde');
+      toast.error('Erreur lors de la sauvegarde');
+      // Revenir à l'état précédent en cas d'erreur
+      setIsPaused(false);
     }
   };
 
