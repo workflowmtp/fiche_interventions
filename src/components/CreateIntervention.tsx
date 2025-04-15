@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+// Nous déplacerons ces fonctions après la déclaration de formDataimport React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { saveIntervention, getNextInterventionNumber, calculateTimeStats } from '../services/interventions';
+import { saveIntervention, getNextInterventionNumber } from '../services/interventions';
 import { useAuth } from '../hooks/useAuth';
 import toast from 'react-hot-toast';
 import Header from './Header';
@@ -15,47 +15,34 @@ import TestValidation from './sections/TestValidation';
 import FinalReport from './sections/FinalReport';
 import SupervisorComment from './sections/SupervisoComment';
 
-import { ArrowLeft, Save, Play, Pause, PlayCircle, StopCircle } from 'lucide-react';
+import { ArrowLeft, Save, Play, Pause, PlayCircle, StopCircle, CheckCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 const CreateIntervention = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
   const [currentTime] = useState(new Date());
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [startTime, setStartTime] = useState(null);
+  const [startTime, setStartTime] = useState<Date | null>(null);
   const [elapsedTime, setElapsedTime] = useState('00:00:00');
-  const [formInitialized, setFormInitialized] = useState(false);
-  
-  // Initialiser formData avec des valeurs par défaut
-  const [formData, setFormData] = useState({
-    interventionNumber: 0,
-    date: new Date().toISOString().split('T')[0],
-    emitter: '',
-    emitterRole: '',
-    userId: '',
-    userName: '',
-    mainMachine: '',
-    secondaryMachine: '',
-    otherEquipment: '',
-    priority: 'yellow',
-    previouslyEncountered: false,
-    pcaInformed: false,
-    pcaOpinion: '',
-    initialDescription: '',
-    technicalDescription: '',
-    technicianName: '',
-    electricalIssues: [],
-    mechanicalIssues: [],
-    pneumaticHydraulicIssues: [],
-    electronicIssues: [],
-    softwareIssues: [],
-    humanIssues: [],
-    environmentalIssues: [],
-    consumableIssues: [],
-    maintenanceIssues: [],
-    otherIssues: '',
+   // Statuts possibles pour l'intervention
+   const INTERVENTION_STATUS = {
+    DRAFT: 'draft',           // Brouillon initial
+    IN_PROGRESS: 'in_progress', // Intervention en cours
+    COMPLETED: 'completed',    // Intervention terminée techniquement
+    SUBMITTED: 'submitted'     // Intervention soumise et validée
+  };
+  const [formData, setFormData] = useState<any>({
+    // Initialisation avec des valeurs par défaut
+    interventionNumber: 0, // Sera mis à jour par getNextInterventionNumber
+    userId: user?.uid || '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    date: new Date().toISOString().split('T')[0], // Date du jour au format YYYY-MM-DD
+    status: 'in_progress', // On commence directement en in_progress
+    timeEntries: [],
+    // Initialisation correcte de rootCauseAnalysis comme un tableau
     rootCauseAnalysis: [{
       problem: '',
       whys: [{ id: Date.now().toString(), value: '' }],
@@ -63,55 +50,78 @@ const CreateIntervention = () => {
       actions: '',
       results: ''
     }],
-    replacedParts: [{
-      name: '',
-      interventionType: '',
-      quantity: 0,
-      lastPurchasePrice: 0,
-      supplier: ''
-    }],
-    verificationTest: false,
-    verificationObservations: '',
-    finalConclusion: '',
-    technicianSignatures: [],
-    supervisorSignature: { name: '', validated: false },
-    status: 'in_progress',
-    timeEntries: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    // Autres structures
+    rootCauses: [],
+    replacedParts: [],
+    testsPerformed: [],
+    // Autres champs par défaut selon votre modèle de données
   });
 
-  // Initialisation du formulaire avec les infos de l'utilisateur quand elles sont disponibles
   useEffect(() => {
-    const initForm = async () => {
+    // Mettre à jour l'ID utilisateur dans formData si user change
+    if (user?.uid && formData.userId !== user.uid) {
+      setFormData((prev: any) => ({
+        ...prev,
+        userId: user.uid
+      }));
+    }
+  }, [user, formData.userId]);
+
+  // Effet pour obtenir le numéro d'intervention suivant
+  useEffect(() => {
+    const fetchNextInterventionNumber = async () => {
       try {
-        // Attendez que l'utilisateur soit chargé
-        if (user?.uid && !formInitialized) {
-          const nextNumber = await getNextInterventionNumber();
-          
-          setFormData(prev => ({
-            ...prev,
-            interventionNumber: nextNumber,
-            userId: user.uid,
-            userName: user.displayName || '',
-            emitter: user.displayName || ''
-          }));
-          
-          setFormInitialized(true);
-        }
+        const nextNumber = await getNextInterventionNumber();
+        setFormData(prev => ({
+          ...prev,
+          interventionNumber: nextNumber
+        }));
       } catch (error) {
-        console.error("Erreur lors de l'initialisation du formulaire:", error);
+        console.error("Erreur lors de la récupération du numéro d'intervention:", error);
+        toast.error("Impossible de récupérer le numéro d'intervention");
       }
     };
 
-    initForm();
-  }, [user, formInitialized]);
+    // Appeler la fonction seulement si le numéro d'intervention n'est pas déjà défini
+    if (formData.interventionNumber === 0) {
+      fetchNextInterventionNumber();
+    }
+  }, [formData.interventionNumber]);
+  
+  // Vérification des champs obligatoires
+  const validateRequiredFields = () => {
+    // Liste des champs obligatoires à vérifier
+    const requiredFields = [
+      { key: 'mainMachine', label: 'Machine principale' },
+      { key: 'initialDescription', label: 'Description initiale' },
+      { key: 'technicianName', label: 'Nom du technicien' }
+    ];
+    
+    for (const field of requiredFields) {
+      if (!formData[field.key] || formData[field.key].trim() === '') {
+        return { isValid: false, missingField: field.label };
+      }
+    }
+    
+    return { isValid: true };
+  };
+  
+  // Vérifier si le formulaire est valide pour l'enregistrement
+  const canSubmitForm = () => {
+    return validateRequiredFields().isValid && user?.uid;
+  };
+  
+  // Vérifier le statut actuel de l'intervention
+  const isInterventionDraft = formData.status === INTERVENTION_STATUS.DRAFT;
+  const isInterventionInProgress = formData.status === INTERVENTION_STATUS.IN_PROGRESS;
+  const isInterventionCompleted = formData.status === INTERVENTION_STATUS.COMPLETED;
+  const isInterventionSubmitted = formData.status === INTERVENTION_STATUS.SUBMITTED;
+  
+  // Vérifier si l'intervention peut être modifiée
+  const isInterventionFinished = isInterventionCompleted || isInterventionSubmitted;
 
-  // Calculer les statistiques de temps
-  const timeStats = useMemo(() => {
-    if (!formData.timeEntries?.length) return null;
-    return calculateTimeStats(formData.timeEntries);
-  }, [formData.timeEntries]);
+  // 🔴 Changement important ici : on définit isFormEditable en fonction de l'état de l'intervention
+  const isFormEditable = (isRunning && !isPaused) && !isInterventionFinished;
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -143,32 +153,23 @@ const CreateIntervention = () => {
     setIsPaused(false);
     setStartTime(now);
     
-    const newTimeEntries = [
-      ...formData.timeEntries,
-      { action: 'start', timestamp: now.toISOString() }
-    ];
-    
     const newFormData = {
       ...formData,
-      status: 'in_progress',
-      timeEntries: newTimeEntries,
-      updatedAt: now.toISOString()
+      timeEntries: [
+        ...(formData.timeEntries || []),
+        { action: 'start', timestamp: now.toISOString() }
+      ],
+      status: INTERVENTION_STATUS.IN_PROGRESS
     };
     
     setFormData(newFormData);
     
     try {
-      const interventionId = await saveIntervention(user.uid, newFormData);
+      await saveIntervention(user.uid, newFormData);
       toast.success('Intervention démarrée');
-      
-      // Mettre à jour l'ID
-      setFormData(prev => ({
-        ...prev,
-        id: interventionId
-      }));
-    } catch (error) {
-      console.error('Error starting intervention:', error);
-      toast.error(error.message || 'Erreur lors du démarrage');
+    } catch (error: any) {
+      console.error('Error saving intervention:', error);
+      toast.error(error.message || 'Erreur lors de la sauvegarde');
     }
   };
 
@@ -178,23 +179,15 @@ const CreateIntervention = () => {
       return;
     }
 
-    if (!formData.id) {
-      toast.error('Veuillez d\'abord démarrer l\'intervention');
-      return;
-    }
-
     const now = new Date();
     setIsPaused(true);
     
-    const newTimeEntries = [
-      ...formData.timeEntries,
-      { action: 'pause', timestamp: now.toISOString() }
-    ];
-    
     const newFormData = {
       ...formData,
-      timeEntries: newTimeEntries,
-      updatedAt: now.toISOString()
+      timeEntries: [
+        ...(formData.timeEntries || []),
+        { action: 'pause', timestamp: now.toISOString() }
+      ]
     };
     
     setFormData(newFormData);
@@ -202,9 +195,9 @@ const CreateIntervention = () => {
     try {
       await saveIntervention(user.uid, newFormData);
       toast.success('Intervention mise en pause');
-    } catch (error) {
-      console.error('Error pausing intervention:', error);
-      toast.error(error.message || 'Erreur lors de la mise en pause');
+    } catch (error: any) {
+      console.error('Error saving intervention:', error);
+      toast.error(error.message || 'Erreur lors de la sauvegarde');
     }
   };
 
@@ -214,23 +207,15 @@ const CreateIntervention = () => {
       return;
     }
 
-    if (!formData.id) {
-      toast.error('Veuillez d\'abord démarrer l\'intervention');
-      return;
-    }
-
     const now = new Date();
     setIsPaused(false);
     
-    const newTimeEntries = [
-      ...formData.timeEntries,
-      { action: 'resume', timestamp: now.toISOString() }
-    ];
-    
     const newFormData = {
       ...formData,
-      timeEntries: newTimeEntries,
-      updatedAt: now.toISOString()
+      timeEntries: [
+        ...(formData.timeEntries || []),
+        { action: 'resume', timestamp: now.toISOString() }
+      ]
     };
     
     setFormData(newFormData);
@@ -238,9 +223,9 @@ const CreateIntervention = () => {
     try {
       await saveIntervention(user.uid, newFormData);
       toast.success('Intervention reprise');
-    } catch (error) {
-      console.error('Error resuming intervention:', error);
-      toast.error(error.message || 'Erreur lors de la reprise');
+    } catch (error: any) {
+      console.error('Error saving intervention:', error);
+      toast.error(error.message || 'Erreur lors de la sauvegarde');
     }
   };
 
@@ -250,8 +235,8 @@ const CreateIntervention = () => {
       return;
     }
 
-    if (!formData.id) {
-      toast.error('Veuillez d\'abord démarrer l\'intervention');
+    // Demander confirmation à l'utilisateur avant de terminer définitivement l'intervention
+    if (!window.confirm("Êtes-vous sûr de vouloir terminer cette intervention ? Une fois terminée, elle ne pourra plus être modifiée.")) {
       return;
     }
 
@@ -261,69 +246,88 @@ const CreateIntervention = () => {
     setStartTime(null);
     setElapsedTime('00:00:00');
     
-    const newTimeEntries = [
-      ...formData.timeEntries,
-      { action: 'stop', timestamp: now.toISOString() }
-    ];
-    
     const newFormData = {
       ...formData,
-      status: 'completed',
-      timeEntries: newTimeEntries,
-      completedAt: now.toISOString(),
-      updatedAt: now.toISOString()
+      timeEntries: [
+        ...(formData.timeEntries || []),
+        { action: 'stop', timestamp: now.toISOString() }
+      ],
+      status: INTERVENTION_STATUS.COMPLETED,
+      completedAt: now.toISOString()
     };
     
     setFormData(newFormData);
     
     try {
       await saveIntervention(user.uid, newFormData);
-      toast.success('Intervention terminée');
-      navigate('/interventions');
-    } catch (error) {
-      console.error('Error stopping intervention:', error);
-      toast.error(error.message || 'Erreur lors de la terminaison');
+      toast.success('Intervention terminée avec succès. Elle est maintenant en lecture seule.');
+      // Rediriger vers la liste des interventions après quelques secondes
+      setTimeout(() => {
+        navigate('/interventions');
+      }, 2000);
+    } catch (error: any) {
+      console.error('Error saving intervention:', error);
+      toast.error(error.message || 'Erreur lors de la sauvegarde');
     }
   };
 
-  const handleSubmit = async (e) => {
+  // Fonction pour soumettre l'intervention après complétion
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     try {
-      setLoading(true);
-      
       if (!user?.uid) {
         toast.error('Vous devez être connecté pour créer une intervention');
         return;
       }
 
-      // Vérifier les champs obligatoires
-      if (!formData.mainMachine || !formData.initialDescription) {
-        toast.error('Veuillez remplir tous les champs obligatoires');
+      // Ensure all required fields are filled
+      const validation = validateRequiredFields();
+      if (!validation.isValid) {
+        toast.error(`Veuillez remplir le champ obligatoire: ${validation.missingField}`);
         return;
       }
 
-      const now = new Date().toISOString();
-      const newFormData = {
+      // Si l'intervention est déjà terminée, la marquer comme soumise
+      const statusToSet = isInterventionCompleted ? 
+                         INTERVENTION_STATUS.SUBMITTED : 
+                         isInterventionInProgress ? 
+                         INTERVENTION_STATUS.IN_PROGRESS : 
+                         INTERVENTION_STATUS.DRAFT;
+
+      // Add creation metadata
+      const interventionToSave = {
         ...formData,
         userId: user.uid,
-        userName: user.displayName || '',
-        updatedAt: now,
+        updatedAt: new Date().toISOString(),
+        status: statusToSet,
+        submittedAt: isInterventionCompleted ? new Date().toISOString() : formData.submittedAt
       };
+
+      await saveIntervention(user.uid, interventionToSave);
       
-      await saveIntervention(user.uid, newFormData);
-      toast.success('Intervention enregistrée avec succès');
-      navigate('/interventions');
-    } catch (error) {
+      if (isInterventionCompleted) {
+        toast.success('Intervention soumise avec succès');
+        // Mettre à jour le statut local
+        setFormData({
+          ...interventionToSave,
+          status: INTERVENTION_STATUS.SUBMITTED
+        });
+      } else {
+        toast.success('Intervention enregistrée avec succès');
+      }
+      
+      // Ne rediriger que si l'intervention est soumise
+      if (isInterventionCompleted) {
+        navigate('/interventions');
+      }
+    } catch (error: any) {
       console.error('Error saving intervention:', error);
-      toast.error(error.message || 'Erreur lors de la sauvegarde');
-    } finally {
-      setLoading(false);
+      toast.error(error.message || 'Erreur lors de l\'enregistrement');
     }
   };
 
-  // Définir si les sections du formulaire sont éditables
-  const isFormEditable = isRunning && !isPaused;
+ 
 
   return (
     <div className="min-h-screen bg-gray-50 p-2 md:p-6">
@@ -337,14 +341,37 @@ const CreateIntervention = () => {
               <ArrowLeft className="w-5 h-5" />
               Retour à la liste
             </button>
-            <button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            >
-              <Save className="w-5 h-5" />
-              {loading ? 'Création...' : 'Enregistrer'}
-            </button>
+            
+            {/* Affichage du statut actuel de l'intervention */}
+            <div className="flex items-center">
+              <div className={`px-3 py-1 rounded-full text-sm font-medium mr-4 ${
+                isInterventionDraft ? 'bg-gray-100 text-gray-800' :
+                isInterventionInProgress ? 'bg-blue-100 text-blue-800' :
+                isInterventionCompleted ? 'bg-yellow-100 text-yellow-800' :
+                'bg-green-100 text-green-800'
+              }`}>
+                {isInterventionDraft ? 'Brouillon' :
+                 isInterventionInProgress ? 'En cours' :
+                 isInterventionCompleted ? 'Terminée' :
+                 'Soumise'}
+              </div>
+              
+              {!isInterventionFinished ? (
+                <button
+                  onClick={handleSubmit}
+                  disabled={!canSubmitForm() || isInterventionFinished}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  <Save className="w-5 h-5" />
+                  {isInterventionCompleted ? 'Soumettre' : 'Enregistrer'}
+                </button>
+              ) : (
+                <div className="px-4 py-2 bg-green-100 text-green-800 rounded flex items-center">
+                  <CheckCircle className="w-5 h-5 mr-2" />
+                  {isInterventionSubmitted ? 'Soumise' : 'Terminée'}
+                </div>
+              )}
+            </div>
           </div>
 
           <Header
@@ -352,38 +379,48 @@ const CreateIntervention = () => {
             isRunning={isRunning}
             isPaused={isPaused}
             elapsedTime={elapsedTime}
-            timeStats={timeStats}
           />
 
           <div className="flex flex-wrap gap-2 mb-6 mt-6">
-            <button
-              onClick={handleStart}
-              disabled={isRunning}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 min-w-[120px]"
-            >
-              <Play className="w-4 h-4" /> Démarrer
-            </button>
-            <button
-              onClick={handlePause}
-              disabled={!isRunning || isPaused}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 disabled:opacity-50 min-w-[120px]"
-            >
-              <Pause className="w-4 h-4" /> Pause
-            </button>
-            <button
-              onClick={handleResume}
-              disabled={!isPaused}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 min-w-[120px]"
-            >
-              <PlayCircle className="w-4 h-4" /> Reprendre
-            </button>
-            <button
-              onClick={handleStop}
-              disabled={!isRunning}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 min-w-[120px]"
-            >
-              <StopCircle className="w-4 h-4" /> Terminer
-            </button>
+            {!isInterventionFinished ? (
+              <>
+                <button
+                  onClick={handleStart}
+                  disabled={isRunning || isInterventionFinished}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 min-w-[120px]"
+                >
+                  <Play className="w-4 h-4" /> Démarrer
+                </button>
+                <button
+                  onClick={handlePause}
+                  disabled={!isRunning || isPaused || isInterventionFinished}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 disabled:opacity-50 min-w-[120px]"
+                >
+                  <Pause className="w-4 h-4" /> Pause
+                </button>
+                <button
+                  onClick={handleResume}
+                  disabled={!isPaused || isInterventionFinished}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 min-w-[120px]"
+                >
+                  <PlayCircle className="w-4 h-4" /> Reprendre
+                </button>
+                <button
+                  onClick={handleStop}
+                  disabled={!isRunning || isInterventionFinished}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 min-w-[120px]"
+                >
+                  <StopCircle className="w-4 h-4" /> Terminer
+                </button>
+              </>
+            ) : (
+              <div className="w-full bg-green-100 text-green-800 p-3 rounded-lg flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 mr-2" />
+                {isInterventionSubmitted ? 
+                  "Cette intervention a été soumise et validée" : 
+                  "Cette intervention est terminée et ne peut plus être modifiée"}
+              </div>
+            )}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -391,25 +428,25 @@ const CreateIntervention = () => {
               formData={formData}
               relatedHistory={[]}
               onFormChange={setFormData}
-              isEditable={true}
+              isEditable={isFormEditable}
             />
             
             <PriorityLevel
               formData={formData}
               onFormChange={setFormData}
-              isEditable={true}
+              isEditable={isFormEditable}
             />
             
             <PreviousIssues
               formData={formData}
               onFormChange={setFormData}
-              isEditable={true}
+              isEditable={isFormEditable}
             />
             
             <IssueDescription
               formData={formData}
               onFormChange={setFormData}
-              isEditable={true}
+              isEditable={isFormEditable}
             />
             
             <Diagnosis
@@ -441,22 +478,34 @@ const CreateIntervention = () => {
               onFormChange={setFormData}
               isEditable={isFormEditable}
             />
-            
+
             <SupervisorComment
               formData={formData}
               onFormChange={setFormData}
-              isEditable={user?.role === 'supervisor'}
+              isEditable={isFormEditable}
             />
-            
+
             <div className="flex justify-end pt-6">
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                <Save className="w-5 h-5" />
-                {loading ? 'Création en cours...' : 'Créer l\'intervention'}
-              </button>
+              {!isInterventionCompleted ? (
+                <button
+                  type="submit"
+                  disabled={!canSubmitForm() }
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  <Save className="w-5 h-5" />
+                  {isInterventionCompleted ? 'Soumettre l\'intervention' : 'Créer l\'intervention'}
+                </button>
+              ) : (
+                <div className="px-6 py-3 bg-green-100 text-green-800 rounded-lg">
+                  <CheckCircle className="w-5 h-5 inline-block mr-2" />
+                  {isInterventionSubmitted ? 'Intervention soumise' : 'Intervention terminée'}
+                </div>
+              )}
+              {!canSubmitForm() && !isInterventionFinished && (
+                <span className="ml-2 text-sm text-red-500 self-center">
+                  Veuillez remplir tous les champs obligatoires
+                </span>
+              )}
             </div>
           </form>
         </div>

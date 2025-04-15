@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { signInWithEmailAndPassword, Auth } from 'firebase/auth';
 import { auth } from '../../config/firebase';
 import { getUserRole } from '../../services/users';
-import { Eye, EyeOff, LogIn, Loader, Mail, Lock, Shield } from 'lucide-react';
+import { Eye, EyeOff, LogIn, Loader, Mail, Lock, Shield, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const Login = () => {
+const AdminLogin = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -20,6 +20,31 @@ const Login = () => {
     form: ''
   });
 
+  useEffect(() => {
+    // Vérifier si un utilisateur est déjà connecté
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        try {
+          // Vérifier le rôle de l'utilisateur
+          const role = await getUserRole(user.uid);
+          
+          if (role === 'admin') {
+            // Si c'est un admin, rediriger vers le dashboard admin
+            navigate('/admin/dashboard');
+          } else {
+            // Si ce n'est pas un admin, afficher un message et déconnecter
+            toast.error('Vous n\'avez pas les droits d\'administration nécessaires');
+            auth.signOut();
+          }
+        } catch (error) {
+          console.error('Error checking user role:', error);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [navigate]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -27,7 +52,7 @@ const Login = () => {
       [name]: value
     }));
     
-    // Clear the error when user types
+    // Effacer l'erreur quand l'utilisateur tape
     if (errors[name as keyof typeof errors]) {
       setErrors(prev => ({
         ...prev,
@@ -39,7 +64,7 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Basic validation
+    // Validation de base
     let hasError = false;
     const newErrors = {
       email: '',
@@ -75,35 +100,26 @@ const Login = () => {
       
       const user = userCredential.user;
       
-      // Récupérer le rôle de l'utilisateur
+      // Vérifier si l'utilisateur est un administrateur
       const role = await getUserRole(user.uid);
       
-      toast.success('Connexion réussie!');
-      
-      // Rediriger en fonction du rôle
-      if (role === 'admin') {
-        // Si c'est un admin et que nous sommes sur la page de connexion standard,
-        // proposer de rediriger vers l'interface admin
-        if (window.location.pathname === '/login') {
-          const useAdminInterface = window.confirm(
-            'Vous êtes connecté en tant qu\'administrateur. Voulez-vous accéder à l\'interface d\'administration?'
-          );
-          if (useAdminInterface) {
-            navigate('/admin/dashboard');
-          } else {
-            navigate('/');
-          }
-        } else {
-          // Nous sommes sur la page de connexion admin, rediriger vers dashboard admin
-          navigate('/admin/dashboard');
-        }
-      } else {
-        // Utilisateur standard
-        navigate('/');
+      if (role !== 'admin') {
+        // Si ce n'est pas un admin, afficher une erreur et déconnecter
+        await auth.signOut();
+        setErrors(prev => ({ 
+          ...prev, 
+          form: 'Vous n\'avez pas les droits d\'administration nécessaires' 
+        }));
+        setLoading(false);
+        return;
       }
+      
+      toast.success('Connexion administrateur réussie!');
+      navigate('/admin/dashboard');
+      
     } catch (error: any) {
       setLoading(false);
-      console.error('Login error:', error);
+      console.error('Admin login error:', error);
       
       // Gérer les erreurs spécifiques de Firebase
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
@@ -118,32 +134,28 @@ const Login = () => {
     }
   };
 
-  const isAdminLogin = window.location.pathname.includes('/admin');
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-lg shadow-lg">
         <div className="text-center">
-          {isAdminLogin ? (
-            <div className="flex justify-center">
-              <Shield className="h-12 w-12 text-blue-600" />
-            </div>
-          ) : (
-            <div className="flex justify-center">
-              <LogIn className="h-12 w-12 text-blue-600" />
-            </div>
-          )}
+          <div className="flex justify-center">
+            <Shield className="h-12 w-12 text-blue-600" />
+          </div>
           <h2 className="mt-4 text-3xl font-extrabold text-gray-900">
-            {isAdminLogin ? 'Connexion administrateur' : 'Connexion'}
+            Connexion administrateur
           </h2>
           <p className="mt-2 text-sm text-gray-600">
             Ou{' '}
-            <Link 
-              to={isAdminLogin ? "/admin/register" : "/register"} 
-              className="font-medium text-blue-600 hover:text-blue-500"
-            >
-              créez un nouveau compte
+            <Link to="/admin/register" className="font-medium text-blue-600 hover:text-blue-500">
+              créez un compte administrateur
             </Link>
+          </p>
+        </div>
+        
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex items-center">
+          <AlertTriangle className="h-5 w-5 mr-2 text-yellow-600" />
+          <p className="text-sm">
+            Cette page est réservée aux administrateurs. Si vous êtes un utilisateur standard, veuillez vous connecter via l'espace utilisateur.
           </p>
         </div>
         
@@ -175,7 +187,7 @@ const Login = () => {
                   className={`appearance-none block w-full pl-10 pr-3 py-2 border ${
                     errors.email ? 'border-red-300' : 'border-gray-300'
                   } rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
-                  placeholder="exemple@email.com"
+                  placeholder="admin@exemple.com"
                 />
               </div>
               {errors.email && (
@@ -251,9 +263,9 @@ const Login = () => {
               {loading ? (
                 <Loader className="w-5 h-5 animate-spin mr-2" />
               ) : (
-                <LogIn className="w-5 h-5 mr-2" />
+                <Shield className="w-5 h-5 mr-2" />
               )}
-              {loading ? 'Connexion en cours...' : 'Se connecter'}
+              {loading ? 'Connexion en cours...' : 'Se connecter en tant qu\'administrateur'}
             </button>
           </div>
         </form>
@@ -269,21 +281,12 @@ const Login = () => {
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-3">
-            {isAdminLogin ? (
-              <Link
-                to="/login"
-                className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                Espace utilisateur
-              </Link>
-            ) : (
-              <Link
-                to="/admin/login"
-                className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                Espace administrateur
-              </Link>
-            )}
+            <Link
+              to="/login"
+              className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Espace utilisateur
+            </Link>
           </div>
         </div>
       </div>
@@ -291,4 +294,4 @@ const Login = () => {
   );
 };
 
-export default Login;
+export default AdminLogin;

@@ -1,21 +1,21 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 
-import { Eye, EyeOff, UserPlus, Loader, CheckCircle, User, Mail, Lock, AtSign, Briefcase } from 'lucide-react';
+import { Eye, EyeOff, UserPlus, Loader, Key, Lock, User, Mail, AtSign, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { createUser } from '../../services/users';
 
-const Register = () => {
+const RegisterAdmin = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [adminCode, setAdminCode] = useState('');
   const [formData, setFormData] = useState({
     displayName: '',
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'user', // Default role
     username: ''
   });
   const [errors, setErrors] = useState({
@@ -24,8 +24,12 @@ const Register = () => {
     password: '',
     confirmPassword: '',
     username: '',
+    adminCode: '',
     form: ''
   });
+
+  // Code administrateur (à remplacer par une vérification plus sécurisée en production)
+  const ADMIN_SECRET_CODE = 'admin1234';
 
   const validateForm = () => {
     let isValid = true;
@@ -35,6 +39,7 @@ const Register = () => {
       password: '',
       confirmPassword: '',
       username: '',
+      adminCode: '',
       form: ''
     };
 
@@ -77,11 +82,20 @@ const Register = () => {
       isValid = false;
     }
 
+    // Validate admin code
+    if (!adminCode) {
+      newErrors.adminCode = 'Le code administrateur est requis';
+      isValid = false;
+    } else if (adminCode !== ADMIN_SECRET_CODE) {
+      newErrors.adminCode = 'Code administrateur invalide';
+      isValid = false;
+    }
+
     setErrors(newErrors);
     return isValid;
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
@@ -97,6 +111,16 @@ const Register = () => {
     }
   };
 
+  const handleAdminCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setAdminCode(e.target.value);
+    if (errors.adminCode) {
+      setErrors(prev => ({
+        ...prev,
+        adminCode: ''
+      }));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -108,19 +132,19 @@ const Register = () => {
     setErrors(prev => ({ ...prev, form: '' }));
 
     try {
-      // Utiliser la fonction createUser du service users
+      // Création de l'utilisateur avec le rôle admin
       await createUser(formData.email, formData.password, {
         displayName: formData.displayName,
         email: formData.email,
-     
+       
         username: formData.username || undefined,
       });
 
-      toast.success('Compte créé avec succès! Vous pouvez maintenant vous connecter.');
-      navigate('/login');
+      toast.success('Compte administrateur créé avec succès!');
+      navigate('/admin/login');
     } catch (error: any) {
       setLoading(false);
-      console.error('Registration error:', error);
+      console.error('Admin registration error:', error);
       
       // Handle specific Firebase errors
       if (error.code === 'auth/email-already-in-use') {
@@ -138,14 +162,17 @@ const Register = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-lg shadow-lg">
         <div className="text-center">
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">Créer un compte</h2>
+          <div className="flex justify-center">
+            <Shield className="h-12 w-12 text-blue-600" />
+          </div>
+          <h2 className="mt-4 text-3xl font-extrabold text-gray-900">Créer un compte administrateur</h2>
           <p className="mt-2 text-sm text-gray-600">
             Ou{' '}
-            <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-              connectez-vous à votre compte existant
+            <Link to="/admin/login" className="font-medium text-blue-600 hover:text-blue-500">
+              connectez-vous à votre compte administrateur
             </Link>
           </p>
         </div>
@@ -205,7 +232,7 @@ const Register = () => {
                   className={`appearance-none block w-full pl-10 pr-3 py-2 border ${
                     errors.email ? 'border-red-300' : 'border-gray-300'
                   } rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
-                  placeholder="john.doe@example.com"
+                  placeholder="admin@example.com"
                 />
               </div>
               {errors.email && (
@@ -231,7 +258,7 @@ const Register = () => {
                   className={`appearance-none block w-full pl-10 pr-3 py-2 border ${
                     errors.username ? 'border-red-300' : 'border-gray-300'
                   } rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
-                  placeholder="johndoe123"
+                  placeholder="admin123"
                 />
               </div>
               {errors.username ? (
@@ -243,14 +270,31 @@ const Register = () => {
               )}
             </div>
             
-            {/* Role - Hidden for regular registration */}
-            <div className="hidden">
-              <input
-                type="hidden"
-                id="role"
-                name="role"
-                value="user"
-              />
+            {/* Admin Code */}
+            <div>
+              <label htmlFor="adminCode" className="block text-sm font-medium text-gray-700">
+                Code administrateur <span className="text-red-500">*</span>
+              </label>
+              <div className="mt-1 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Key className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="adminCode"
+                  name="adminCode"
+                  type="password"
+                  required
+                  value={adminCode}
+                  onChange={handleAdminCodeChange}
+                  className={`appearance-none block w-full pl-10 pr-3 py-2 border ${
+                    errors.adminCode ? 'border-red-300' : 'border-gray-300'
+                  } rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm`}
+                  placeholder="Code spécial administrateur"
+                />
+              </div>
+              {errors.adminCode && (
+                <p className="mt-1 text-sm text-red-600">{errors.adminCode}</p>
+              )}
             </div>
             
             {/* Password */}
@@ -343,9 +387,9 @@ const Register = () => {
               {loading ? (
                 <Loader className="w-5 h-5 animate-spin mr-2" />
               ) : (
-                <UserPlus className="w-5 h-5 mr-2" />
+                <Shield className="w-5 h-5 mr-2" />
               )}
-              {loading ? 'Création du compte...' : 'Créer mon compte'}
+              {loading ? 'Création du compte...' : 'Créer un compte administrateur'}
             </button>
           </div>
         </form>
@@ -356,18 +400,23 @@ const Register = () => {
               <div className="w-full border-t border-gray-300"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-white text-gray-500">Ou continuez avec</span>
+              <span className="px-2 bg-white text-gray-500">Navigation</span>
             </div>
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-3">
-            <button
-              type="button"
-              className="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              onClick={() => navigate('/login')}
+            <Link
+              to="/admin/login"
+              className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
             >
-              Connectez-vous à un compte existant
-            </button>
+              Connexion administrateur
+            </Link>
+            <Link
+              to="/login"
+              className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Espace utilisateur
+            </Link>
           </div>
         </div>
       </div>
@@ -375,4 +424,4 @@ const Register = () => {
   );
 };
 
-export default Register;
+export default RegisterAdmin;

@@ -1,27 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { saveIntervention, getNextInterventionNumber } from '../services/interventions';
+import { useNavigate, useParams } from 'react-router-dom';
+import { saveIntervention, getNextInterventionNumber, getIntervention } from '../services/interventions';
 import { useAuth } from '../hooks/useAuth';
-import { getAllUsers } from '../services/users'; // Importation correcte
+import { getAllUsers, AppUser } from '../services/users';
 import toast from 'react-hot-toast';
 import Header from './Header';
 import { ArrowLeft, Save, Users, User, UserCheck, Briefcase, Search, CheckCircle, Trash2 } from 'lucide-react';
 
-// Types pour les utilisateurs
-interface AppUser {
-  uid: string;
-  displayName: string;
-  email: string;
-  role?: string;
-  photoURL?: string;
-  isAdmin?: boolean;
-}
-
 const CreateInterventionUpdated = () => {
   const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [currentTime] = useState(new Date());
   const [loading, setLoading] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(!!id);
   const [formData, setFormData] = useState<any>({
     interventionNumber: 0,
     date: new Date().toISOString().split('T')[0],
@@ -40,51 +32,79 @@ const CreateInterventionUpdated = () => {
   const [availableUsers, setAvailableUsers] = useState<AppUser[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Pas besoin de filtre pour seulement deux types d'utilisateurs
+  
   // État pour les techniciens sélectionnés
   const [selectedTechnicians, setSelectedTechnicians] = useState<AppUser[]>([]);
   
   // État pour le superviseur sélectionné
   const [selectedSupervisor, setSelectedSupervisor] = useState<AppUser | null>(null);
 
+  // Charger les données de l'intervention existante si on est en mode édition
+  useEffect(() => {
+    const loadExistingIntervention = async () => {
+      if (id && user?.uid) {
+        try {
+          setLoading(true);
+          const interventionData = await getIntervention(id, user.uid);
+          
+          if (interventionData) {
+            // Mettre à jour le formulaire avec les données existantes
+            setFormData({
+              ...interventionData,
+              // S'assurer que la date est au bon format pour l'input date
+              date: interventionData.date || interventionData.interventionDate || new Date().toISOString().split('T')[0],
+              // Mettre à jour pour indiquer que c'est une édition
+              updatedAt: new Date().toISOString()
+            });
+            
+            // Récupérer les techniciens et le superviseur si présents
+            if (interventionData.technicianSignatures && interventionData.technicianSignatures.length > 0) {
+              // Convertir les signatures en objets AppUser pour les sélectionnés
+              const techs = interventionData.technicianSignatures.map((sig: any) => ({
+                uid: sig.uid,
+                displayName: sig.name,
+                email: '',
+                role: sig.role || 'technician'
+              }));
+              setSelectedTechnicians(techs);
+            }
+            
+            if (interventionData.supervisorSignature && interventionData.supervisorSignature.uid) {
+              setSelectedSupervisor({
+                uid: interventionData.supervisorSignature.uid,
+                displayName: interventionData.supervisorSignature.name,
+                email: '',
+                role: 'supervisor'
+              });
+            }
+            
+            toast.success("Intervention chargée avec succès");
+          }
+        } catch (error) {
+          console.error("Erreur lors du chargement de l'intervention:", error);
+          toast.error("Erreur lors du chargement de l'intervention");
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+    
+    loadExistingIntervention();
+  }, [id, user]);
+
   useEffect(() => {
     const initializeForm = async () => {
       try {
         setLoading(true);
-        // Récupérer le prochain numéro d'intervention
-        if (!formData.interventionNumber) {
+        // Récupérer le prochain numéro d'intervention seulement si on n'est pas en mode édition
+        if (!isEditMode && !formData.interventionNumber) {
           const nextNumber = await getNextInterventionNumber();
-          setFormData((prev: any) => ({ ...prev, interventionNumber: nextNumber }));
+          setFormData(prev => ({ ...prev, interventionNumber: nextNumber }));
         }
         
-        // Simuler la récupération des utilisateurs
-        // Note: Pour le moment, nous simulons la liste des utilisateurs
-        // jusqu'à ce que le service users.ts soit correctement implémenté
-        const mockUsers: AppUser[] = [
-          {
-            uid: '1',
-            displayName: 'John Doe',
-            email: 'john@example.com',
-            role: 'Technicien'
-          },
-          {
-            uid: '2',
-            displayName: 'Jane Smith',
-            email: 'jane@example.com',
-            role: 'Superviseur'
-          },
-          {
-            uid: '3',
-            displayName: 'Robert Johnson',
-            email: 'robert@example.com',
-            role: 'Technicien'
-          }
-        ];
-        
-        setAvailableUsers(mockUsers);
-        
-        // Quand le service sera implémenté, remplacez par:
-        // const users = await getAllUsers();
-        // setAvailableUsers(users);
+        // Récupérer la liste des utilisateurs
+        await loadUsers();
       } catch (error) {
         console.error('Error initializing form:', error);
         toast.error('Erreur lors de l\'initialisation du formulaire');
@@ -96,10 +116,22 @@ const CreateInterventionUpdated = () => {
     initializeForm();
   }, []);
 
+  const loadUsers = async () => {
+    try {
+      // Récupérer tous les utilisateurs
+      const users = await getAllUsers();
+      setAvailableUsers(users);
+      
+    } catch (error) {
+      console.error('Error loading users:', error);
+      toast.error('Erreur lors du chargement des utilisateurs');
+    }
+  };
+
   useEffect(() => {
     // Update user ID in formData if user changes
     if (user?.uid && formData.userId !== user.uid) {
-      setFormData((prev: { emitter: any; }) => ({
+      setFormData(prev => ({
         ...prev,
         userId: user.uid,
         emitter: user.displayName || prev.emitter
@@ -109,7 +141,7 @@ const CreateInterventionUpdated = () => {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev: any) => ({
+    setFormData(prev => ({
       ...prev,
       [name]: value
     }));
@@ -122,13 +154,15 @@ const CreateInterventionUpdated = () => {
   const filteredUsers = searchQuery 
     ? availableUsers.filter(user => 
         user.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        user.email?.toLowerCase().includes(searchQuery.toLowerCase())
+        user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        user.username?.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : availableUsers;
 
   const selectTechnician = (selectedUser: AppUser) => {
     if (!selectedTechnicians.some(tech => tech.uid === selectedUser.uid)) {
       setSelectedTechnicians([...selectedTechnicians, selectedUser]);
+      setSearchQuery(''); // Clear search after selection
     }
   };
 
@@ -138,6 +172,7 @@ const CreateInterventionUpdated = () => {
 
   const selectSupervisor = (selectedUser: AppUser) => {
     setSelectedSupervisor(selectedUser);
+    setSearchQuery(''); // Clear search after selection
   };
 
   const removeSupervisor = () => {
@@ -147,54 +182,79 @@ const CreateInterventionUpdated = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!user?.uid) {
+      toast.error('Vous devez être connecté pour créer une intervention');
+      return;
+    }
+
+    // Validation des champs obligatoires
+    if (!formData.initialDescription) {
+      toast.error('Veuillez fournir une description de l\'incident');
+      return;
+    }
+
     try {
-      if (!user?.uid) {
-        toast.error('Vous devez être connecté pour créer une intervention');
-        return;
-      }
-
-      // Validation des champs obligatoires
-      if (!formData.initialDescription) {
-        toast.error('Veuillez fournir une description de l\'incident');
-        return;
-      }
-
       setLoading(true);
       
       // Préparer les données pour l'enregistrement
       const interventionToSave = {
         ...formData,
-        userId: user.uid,
-        createdAt: new Date().toISOString(),
+        createdBy: user.uid, // Ajout du créateur
+        // En mode édition, on conserve l'ID de l'utilisateur d'origine
+        userId: isEditMode ? formData.userId : user.uid,
+        // En mode édition, on conserve la date de création originale
+        createdAt: isEditMode ? formData.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        status: 'draft',
-        technicianSignatures: selectedTechnicians.map(tech => ({ 
-          uid: tech.uid,
-          name: tech.displayName, 
-          role: tech.role || 'Technicien',
-          validated: false 
-        })),
+        status: isEditMode ? formData.status : 'en cours', // Utiliser le statut existant en mode édition
+        
+        // Ajouter automatiquement le créateur comme technicien s'il n'est pas déjà dans la liste
+        technicianSignatures: [
+          // Ajouter d'abord le créateur comme technicien
+          {
+            uid: user.uid,
+            name: user.displayName || 'Utilisateur',
+            role: user.role || 'user',
+            validated: true // Le créateur valide automatiquement sa signature
+          },
+          // Puis ajouter les autres techniciens sélectionnés (sauf si c'est le créateur)
+          ...selectedTechnicians
+            .filter(tech => tech.uid !== user.uid) // Éviter les doublons
+            .map(tech => ({ 
+              uid: tech.uid,
+              name: tech.displayName, 
+              role: tech.role || 'user',
+              validated: false 
+            }))
+        ],
+        
         supervisorSignature: selectedSupervisor 
           ? {
               uid: selectedSupervisor.uid,
               name: selectedSupervisor.displayName,
-              role: selectedSupervisor.role || 'Superviseur',
+              role: selectedSupervisor.role || 'user',
               validated: false
             }
           : null
       };
 
+      // En mode édition, on ajoute l'ID existant
+      if (isEditMode && id) {
+        interventionToSave.id = id;
+      }
+      
       // Enregistrer l'intervention
       await saveIntervention(user.uid, interventionToSave);
-      toast.success('Intervention créée avec succès');
+      toast.success(isEditMode ? 'Intervention mise à jour avec succès' : 'Intervention créée avec succès');
       navigate('/interventions');
     } catch (error: any) {
-      console.error('Error creating intervention:', error);
-      toast.error(error.message || 'Erreur lors de la création');
+      console.error(isEditMode ? 'Error updating intervention:' : 'Error creating intervention:', error);
+      toast.error(error.message || (isEditMode ? 'Erreur lors de la mise à jour' : 'Erreur lors de la création'));
     } finally {
       setLoading(false);
     }
   };
+
+  // Fonction de chargement simplifiée sans filtres
 
   if (loading) {
     return (
@@ -217,7 +277,7 @@ const CreateInterventionUpdated = () => {
               Retour à la liste
             </button>
             <h1 className="text-2xl font-bold text-center text-gray-800">
-              Nouvelle fiche d'intervention
+              {isEditMode ? "Édition d'une fiche d'intervention" : "Nouvelle fiche d'intervention"}
             </h1>
             <button
               onClick={handleSubmit}
@@ -225,7 +285,7 @@ const CreateInterventionUpdated = () => {
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
             >
               <Save className="w-5 h-5" />
-              Enregistrer
+              {isEditMode ? "Mettre à jour" : "Enregistrer"}
             </button>
           </div>
 
@@ -324,17 +384,21 @@ const CreateInterventionUpdated = () => {
                 </h2>
               </div>
               <div className="p-4 md:p-6">
-                {/* Recherche d'utilisateurs */}
+                {/* Recherche d'utilisateurs avec filtres */}
                 <div className="mb-6">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <input
-                      type="text"
-                      placeholder="Rechercher un utilisateur..."
-                      value={searchQuery}
-                      onChange={handleUserSearch}
-                      className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                    />
+                  <div className="flex flex-col sm:flex-row gap-3 mb-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                      <input
+                        type="text"
+                        placeholder="Rechercher un utilisateur..."
+                        value={searchQuery}
+                        onChange={handleUserSearch}
+                        className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                    
+                    {/* Pas de filtres nécessaires pour seulement deux types d'utilisateurs */}
                   </div>
                   
                   {searchQuery && (
@@ -357,6 +421,9 @@ const CreateInterventionUpdated = () => {
                                 <div>
                                   <div className="font-medium text-gray-900">{user.displayName || 'Sans nom'}</div>
                                   <div className="text-sm text-gray-500">{user.email}</div>
+                                  <div className="text-xs text-gray-500">
+                                    Rôle: {user.role === 'admin' ? 'Administrateur' : 'Utilisateur standard'}
+                                  </div>
                                 </div>
                               </div>
                               <div className="flex gap-2">
@@ -364,6 +431,7 @@ const CreateInterventionUpdated = () => {
                                   type="button"
                                   onClick={() => selectTechnician(user)}
                                   className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200"
+                                  disabled={user.role === 'admin'} // Désactiver si c'est un admin
                                 >
                                   + Technicien
                                 </button>
@@ -371,6 +439,7 @@ const CreateInterventionUpdated = () => {
                                   type="button"
                                   onClick={() => selectSupervisor(user)}
                                   className="text-xs px-2 py-1 bg-purple-100 text-purple-800 rounded hover:bg-purple-200"
+                                  disabled={user.role === 'admin'} // Désactiver si c'est un admin
                                 >
                                   + Superviseur
                                 </button>
@@ -412,6 +481,9 @@ const CreateInterventionUpdated = () => {
                             <div>
                               <div className="font-medium text-gray-900">{tech.displayName}</div>
                               <div className="text-xs text-gray-500">{tech.email}</div>
+                              <div className="text-xs text-blue-600">
+                                {tech.role === 'admin' ? 'Administrateur' : 'Utilisateur standard'}
+                              </div>
                             </div>
                           </div>
                           <button
@@ -479,7 +551,7 @@ const CreateInterventionUpdated = () => {
                 className="flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
                 <CheckCircle className="w-5 h-5" />
-                Créer l'intervention
+                {isEditMode ? "Mettre à jour l'intervention" : "Créer l'intervention"}
               </button>
             </div>
           </form>

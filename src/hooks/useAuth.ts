@@ -1,52 +1,65 @@
 import { useState, useEffect } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from '../config/firebase';
-import { getUserRole } from '../services/users';
-import toast from 'react-hot-toast';
+import { auth, db } from '../config/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 
-interface AuthState {
-  user: User | null;
-  loading: boolean;
-  isAdmin: boolean;
+export interface AppUser {
+  uid: string;
+  displayName?: string | null;
+  email?: string | null;
+  role?: 'user' | 'admin' | 'technician' | 'supervisor';
+  photoURL?: string | null;
 }
 
 export const useAuth = () => {
-  const [authState, setAuthState] = useState<AuthState>({
-    user: null,
-    loading: true,
-    isAdmin: false
-  });
+  const [user, setUser] = useState<AppUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
+    const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
+      if (authUser) {
+        // Récupérer les informations supplémentaires de Firestore
+        const userRef = doc(db, 'users', authUser.uid);
         try {
-          const role = await getUserRole(user.uid);
-          setAuthState({
-            user,
-            loading: false,
-            isAdmin: role === 'admin'
-          });
+          const userDoc = await getDoc(userRef);
+          
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            const appUser: AppUser = {
+              uid: authUser.uid,
+              displayName: authUser.displayName || userData.displayName || authUser.email?.split('@')[0],
+              email: authUser.email,
+              photoURL: authUser.photoURL || userData.photoURL,
+              role: userData.role || 'user'
+            };
+
+            setUser(appUser);
+            setIsAdmin(userData.role === 'admin');
+          } else {
+            // Fallback si le document Firestore n'existe pas
+            const appUser: AppUser = {
+              uid: authUser.uid,
+              displayName: authUser.displayName || authUser.email?.split('@')[0],
+              email: authUser.email,
+              photoURL: authUser.photoURL,
+              role: 'user'
+            };
+            setUser(appUser);
+          }
         } catch (error) {
-          console.error('Error getting user role:', error);
-          toast.error('Erreur de connexion. Certaines fonctionnalités peuvent être limitées.');
-          setAuthState({
-            user,
-            loading: false,
-            isAdmin: false // Default to non-admin on error
-          });
+          console.error('Erreur lors de la récupération des données utilisateur:', error);
+          setUser(null);
         }
       } else {
-        setAuthState({
-          user: null,
-          loading: false,
-          isAdmin: false
-        });
+        setUser(null);
+        setIsAdmin(false);
       }
+      setLoading(false);
     });
 
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
-  return authState;
+  return { user, loading, isAdmin };
 };

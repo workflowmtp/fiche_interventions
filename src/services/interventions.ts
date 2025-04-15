@@ -1,448 +1,352 @@
 import { db } from '../config/firebase';
-import { Firestore } from 'firebase/firestore';
-import { collection, addDoc, getDocs, query, where, updateDoc, doc, orderBy, arrayUnion, getCountFromServer, getDoc } from 'firebase/firestore';
-import { Part, updatePart } from './parts';
-import { getUserByUsername, getUserRole } from './users';
+import {
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  limit,
+  or
+} from 'firebase/firestore';
 
-
-
-export interface TimeEntry {
-  action: 'start' | 'pause' | 'resume' | 'stop';
-  timestamp: string;
-}
-
-export interface TimeStats {
-  effectiveTime: number;
-  totalTime: number;
-  pauseCount: number;
-  pauseDurations: number[];
-  averagePauseDuration: number;
-  startTime: string | null;
-  endTime: string | null;
-}
-
+// ======================================
+// Types
+// ======================================
 export interface Intervention {
-  id?: string;
-  interventionNumber: number;
-  userId: string;
-  emitter: string;
-  emitterRole: string;
-  date: string;
-  mainMachine?: string;
-  secondaryMachine?: string;
-  otherEquipment?: string;
-  priority: 'yellow' | 'orange' | 'red';
-  status: 'in_progress' | 'completed';
-  timeEntries: TimeEntry[];
-  timeStats?: TimeStats;
-  createdAt: string;
-  updatedAt: string;
-  completedAt?: string;
+  id: string; // ID is non-optional now
+  createdBy: string; // Nouveau champ
+  userId: string; // ID of the user who created the intervention
+  modifiedBy?: string; // ID of the user who last modified the intervention
+  createdAt: string; // ISO Date string
+  updatedAt: string; // ISO Date string
+  interventionNumber?: string; // Numéro d'intervention
+  clientName: string; // Nom du client
+  clientAddress: string; // Adresse du client
+  clientPhone?: string; // Téléphone du client (optionnel)
+  clientEmail?: string; // Email du client (optionnel)
+  interventionDate: string; // Date d'intervention
+  date?: string; // Date alternative (pour compatibilité)
+  interventionTime: string; // Heure d'intervention
+  priority: 'yellow' | 'orange' | 'red'; // Align with component usage
+  degreeUrgence: 'Faible' | 'Moyenne' | 'Élevée'; // Keep original French if needed elsewhere, or consolidate
+  interventionType: string;
+  description?: string; // Optional if sometimes absent
+  initialDescription?: string; // Added field
+  status: 'in_progress' | 'completed' | 'submitted'; // Align with component usage
+  technicianId?: string; // ID of the assigned technician
+  technicianName?: string; // Added field
+  emitterId?: string; // ID of the emitter if different from creator
+  intervenants?: string[]; // List of other involved personnel IDs
+  technicianSignatures?: Array<{ uid: string; name: string; date: string; signature: string; validated?: boolean }>; // Added validated field (optional)
+  supervisorSignature?: { uid: string; name: string; date: string; signature: string; validated?: boolean }; // Signature du superviseur
+  clientSignature?: { name: string; date: string; signature: string }; // Client signature
+  observations?: string;
+  materielUsed?: Array<{ name: string; quantity: number }>; // Material used
+  timeEntries?: Array<{ start: string; end: string; description?: string }>; // Time tracking
+  mainMachine?: string; // Added field
+  secondaryMachine?: string; // Added field
 }
 
-export const calculateTimeStats = (timeEntries: TimeEntry[]): TimeStats => {
+// Constantes
+const COLLECTION_INTERVENTIONS = 'interventions';
+
+/**
+ * Sauvegarde une intervention dans Firestore
+ */
+export const saveIntervention = async (userId: string, interventionData: Partial<Intervention>) => {
+  try {
+    const now = new Date().toISOString();
+    let interventionId = interventionData.id || doc(collection(db, COLLECTION_INTERVENTIONS)).id;
+    
+    // Préparer les données
+    const dataToSave = {
+      ...interventionData,
+      createdBy: interventionData.createdBy || userId, // Préserve le créateur original
+      modifiedBy: userId, // Enregistre le dernier modificateur
+      id: interventionId,
+      // Ne pas écraser le userId existant s'il y en a un
+      userId: userId || interventionData.userId,
+      updatedAt: now,
+      createdAt: interventionData.createdAt || now
+    };
+    
+    // Sauvegarder ou mettre à jour l'intervention
+    await setDoc(doc(db, COLLECTION_INTERVENTIONS, interventionId), dataToSave, { merge: true });
+    
+    return interventionId;
+  } catch (error) {
+    console.error('Error saving intervention:', error);
+    throw error;
+  }
+};
+
+/**
+ * Récupère une intervention spécifique par son ID
+ */
+export const getIntervention = async (interventionId: string, userId: string): Promise<Intervention> => {
+  try {
+    const interventionDoc = await getDoc(doc(db, COLLECTION_INTERVENTIONS, interventionId));
+    
+    if (!interventionDoc.exists()) {
+      throw new Error('Intervention not found');
+    }
+    
+    const interventionData = interventionDoc.data();
+    
+    // Vérifier les permissions pour l'accès à l'intervention
+    // L'utilisateur doit être soit le créateur, soit l'admin, soit associé à l'intervention
+    if (interventionData.userId !== userId && interventionData.createdBy !== userId) {
+      // Vérifier si l'utilisateur est associé à l'intervention
+      const isAssociated = 
+        // Technicien assigné
+        interventionData.technicianId === userId || 
+        // Émetteur de la demande
+        interventionData.emitterId === userId ||
+        // Dans la liste des intervenants
+        (interventionData.intervenants && 
+          Array.isArray(interventionData.intervenants) && 
+          interventionData.intervenants.includes(userId)) ||
+        // Dans la liste des signatures de techniciens
+        (interventionData.technicianSignatures && 
+          Array.isArray(interventionData.technicianSignatures) &&
+          interventionData.technicianSignatures.some(sig => 
+            sig.uid === userId || sig.name === userId || sig.technicianId === userId)) ||
+        // Est le superviseur
+        (interventionData.supervisorSignature && 
+          (interventionData.supervisorSignature.uid === userId || 
+           interventionData.supervisorSignature.name === userId));
+      
+      if (!isAssociated) {
+        throw new Error('Unauthorized access to intervention');
+      }
+    }
+    
+    return {
+      id: interventionDoc.id,
+      ...interventionData
+    } as Intervention;
+  } catch (error) {
+    console.error('Error fetching intervention:', error);
+    throw error;
+  }
+};
+
+/**
+ * Récupère toutes les interventions d'un utilisateur
+ * Y compris celles où l'utilisateur est intervenant via technicianSignatures
+ */
+export const getUserInterventions = async (userId: string): Promise<Intervention[]> => {
+  try {
+    const interventions: Intervention[] = [];
+    const processedIds = new Set<string>();
+    
+    // 1. Récupérer les interventions créées par l'utilisateur
+    const creatorQuery = query(
+      collection(db, COLLECTION_INTERVENTIONS),
+      where('createdBy', '==', userId)
+    );
+    const creatorSnapshot = await getDocs(creatorQuery);
+    
+    creatorSnapshot.forEach(doc => {
+      processedIds.add(doc.id);
+      interventions.push({
+        id: doc.id,
+        ...doc.data()
+      } as Intervention);
+    });
+    
+    // 2. Récupérer les interventions où l'utilisateur est technicien
+    // Firestore ne peut pas faire de requête complexe sur les éléments d'un tableau
+    // On doit donc faire une requête plus large et filtrer côté client
+    const allInterventionsQuery = query(collection(db, COLLECTION_INTERVENTIONS));
+    const allInterventionsSnapshot = await getDocs(allInterventionsQuery);
+    
+    allInterventionsSnapshot.forEach(doc => {
+      // Éviter les doublons
+      if (processedIds.has(doc.id)) return;
+      
+      const data = doc.data();
+      
+      // Vérifier si l'utilisateur est technicien
+      const isTechnician = data.technicianSignatures && 
+        Array.isArray(data.technicianSignatures) &&
+        data.technicianSignatures.some(sig => sig.uid === userId);
+      
+      // Vérifier si l'utilisateur est superviseur
+      const isSupervisor = data.supervisorSignature && 
+        data.supervisorSignature.uid === userId;
+      
+      // Ajouter l'intervention si l'utilisateur est technicien ou superviseur
+      if (isTechnician || isSupervisor) {
+        interventions.push({
+          id: doc.id,
+          ...data
+        } as Intervention);
+      }
+    });
+    
+    // Trier par date de mise à jour (les plus récentes d'abord)
+    return interventions.sort((a, b) => 
+      new Date(b.updatedAt || b.createdAt).getTime() - 
+      new Date(a.updatedAt || a.createdAt).getTime()
+    );
+  } catch (error) {
+    console.error('Error fetching user interventions:', error);
+    throw error;
+  }
+};
+
+/**
+ * Récupère les interventions terminées (accessible par les administrateurs)
+ */
+export const getCompletedInterventions = async (): Promise<Intervention[]> => {
+  try {
+    const interventionsRef = collection(db, COLLECTION_INTERVENTIONS);
+    // On récupère toutes les interventions sans filtre particulier pour les admins
+    const snapshot = await getDocs(interventionsRef);
+    
+    const interventions: Intervention[] = [];
+    
+    snapshot.forEach(doc => {
+      interventions.push({
+        id: doc.id,
+        ...doc.data()
+      } as Intervention);
+    });
+    
+    // Trier par date de mise à jour décroissante (les plus récentes d'abord)
+    return interventions.sort((a, b) => 
+      new Date(b.updatedAt || b.createdAt).getTime() - 
+      new Date(a.updatedAt || a.createdAt).getTime()
+    );
+  } catch (error) {
+    console.error('Error fetching completed interventions:', error);
+    throw error;
+  }
+};
+
+/**
+ * Récupère le prochain numéro d'intervention disponible
+ */
+export const getNextInterventionNumber = async () => {
+  try {
+    const interventionsRef = collection(db, COLLECTION_INTERVENTIONS);
+    const q = query(interventionsRef, orderBy('interventionNumber', 'desc'), limit(1));
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      return 1; // Premier numéro d'intervention
+    }
+    
+    const latestIntervention = snapshot.docs[0].data();
+    const latestNumber = latestIntervention.interventionNumber || 0;
+    
+    return latestNumber + 1;
+  } catch (error) {
+    console.error('Error getting next intervention number:', error);
+    throw error;
+  }
+};
+
+/**
+ * Formate la durée en millisecondes en format heures:minutes:secondes
+ */
+export const formatDuration = (durationMs: number) => {
+  const seconds = Math.floor(durationMs / 1000);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+};
+
+/**
+ * Calcule les statistiques de temps à partir des entrées de temps
+ */
+export const calculateTimeStats = (timeEntries: any[]) => {
+  if (!timeEntries || timeEntries.length === 0) {
+    return {
+      effectiveTime: 0,
+      totalTime: 0,
+      pauseCount: 0,
+      pauseDurations: [],
+      averagePauseDuration: 0
+    };
+  }
+  
   let effectiveTime = 0;
   let totalTime = 0;
+  let startTime = null;
+  let pauseStartTime = null;
   let pauseCount = 0;
-  let pauseDurations: number[] = [];
-  let lastTimestamp: Date | null = null;
-  let pauseStartTime: Date | null = null;
-  let startTime: string | null = null;
-  let endTime: string | null = null;
-
-  timeEntries.forEach((entry) => {
+  let pauseDurations = [];
+  
+  // Trier les entrées par timestamp
+  const sortedEntries = [...timeEntries].sort((a, b) => 
+    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  
+  for (let i = 0; i < sortedEntries.length; i++) {
+    const entry = sortedEntries[i];
     const currentTime = new Date(entry.timestamp);
-
+    
     switch (entry.action) {
       case 'start':
-        lastTimestamp = currentTime;
-        startTime = entry.timestamp;
+        startTime = currentTime;
         break;
+        
       case 'pause':
-        if (lastTimestamp) {
-          effectiveTime += currentTime.getTime() - lastTimestamp.getTime();
-          pauseStartTime = currentTime;
-          pauseCount++;
+        if (startTime) {
+          effectiveTime += currentTime.getTime() - startTime.getTime();
+          startTime = null;
         }
+        pauseStartTime = currentTime;
+        pauseCount++;
         break;
+        
       case 'resume':
         if (pauseStartTime) {
           const pauseDuration = currentTime.getTime() - pauseStartTime.getTime();
           pauseDurations.push(pauseDuration);
-          lastTimestamp = currentTime;
+          pauseStartTime = null;
+        }
+        startTime = currentTime;
+        break;
+        
+      case 'stop':
+        if (startTime) {
+          effectiveTime += currentTime.getTime() - startTime.getTime();
+          startTime = null;
+        }
+        if (pauseStartTime) {
+          const pauseDuration = currentTime.getTime() - pauseStartTime.getTime();
+          pauseDurations.push(pauseDuration);
           pauseStartTime = null;
         }
         break;
-      case 'stop':
-        if (lastTimestamp) {
-          if (pauseStartTime) {
-            const pauseDuration = currentTime.getTime() - pauseStartTime.getTime();
-            pauseDurations.push(pauseDuration);
-          } else {
-            effectiveTime += currentTime.getTime() - lastTimestamp.getTime();
-          }
-          endTime = entry.timestamp;
-          const firstEntry = timeEntries[0];
-          totalTime = currentTime.getTime() - new Date(firstEntry.timestamp).getTime();
-        }
-        break;
     }
-  });
-
-  const averagePauseDuration = pauseDurations.length > 0
+  }
+  
+  // Calculer le temps total
+  if (sortedEntries.length >= 2) {
+    const firstTime = new Date(sortedEntries[0].timestamp);
+    const lastTime = new Date(sortedEntries[sortedEntries.length - 1].timestamp);
+    totalTime = lastTime.getTime() - firstTime.getTime();
+  }
+  
+  // Calculer la durée moyenne des pauses
+  const averagePauseDuration = pauseDurations.length
     ? pauseDurations.reduce((a, b) => a + b, 0) / pauseDurations.length
     : 0;
-
+  
   return {
     effectiveTime,
     totalTime,
     pauseCount,
     pauseDurations,
-    averagePauseDuration,
-    startTime,
-    endTime
+    averagePauseDuration
   };
-};
-
-export const getNextInterventionNumber = async (): Promise<number> => {
-  try {
-    const interventionsRef = collection(db, 'interventions');
-    const snapshot = await getCountFromServer(interventionsRef);
-    return snapshot.data().count + 1;
-  } catch (error) {
-    console.error('Error getting intervention count:', error);
-    throw new Error('Erreur lors de la génération du numéro d\'intervention');
-  }
-};
-
-export const getIntervention = async (id: string, userId: string) => {
-  if (!id) {
-    throw new Error('ID d\'intervention manquant');
-  }
-
-  if (!userId) {
-    throw new Error('Vous devez être connecté pour accéder à cette intervention');
-  }
-
-  try {
-    const docRef = doc(db, 'interventions', id);
-    const docSnap = await getDoc(docRef);
-    
-    if (!docSnap.exists()) {
-      throw new Error('Intervention introuvable');
-    }
-    
-    const data = docSnap.data();
-    
-    // Désactiver temporairement la vérification d'autorisation
-    /* Commentez ces lignes pour tester
-    // Vérifier si l'utilisateur est admin
-    const userRole = await getUserRole(userId);
-    
-    // Autoriser l'accès si l'utilisateur est le créateur OU un admin
-    if (data.userId !== userId && userRole !== 'admin') {
-      console.warn('Tentative d\'accès non autorisé', {
-        interventionUserId: data.userId,
-        currentUserId: userId,
-        userRole: userRole
-      });
-      throw new Error('Vous n\'avez pas accès à cette intervention');
-    }
-    */
-    
-    // Initialize timeEntries if not present
-    if (!data.timeEntries) {
-      data.timeEntries = [];
-    }
-    
-    return {
-      id: docSnap.id,
-      ...data,
-      timeEntries: data.timeEntries || []
-    };
-  } catch (error: any) {
-    console.error('Error getting intervention:', error);
-    // Return the specific error message or a generic one
-    throw new Error(error.message || 'Erreur lors du chargement de l\'intervention');
-  }
-};
-
-export const saveIntervention = async (userId: string, formData: any): Promise<string> => {
-  if (!userId) {
-    throw new Error('Vous devez être connecté pour sauvegarder une intervention');
-  }
-
-  let retries = 3;
-  let delay = 1000;
-
-  while (retries > 0) {
-    try {
-      const interventionNumber = formData.interventionNumber || await getNextInterventionNumber();
-      
-      const timeStats = formData.timeEntries?.length > 0
-        ? calculateTimeStats(formData.timeEntries)
-        : null;
-
-      // Update parts information if any parts are specified
-      if (formData.replacedParts?.length > 0) {
-        for (const part of formData.replacedParts) {
-          if (!part.designation) continue;
-
-          const partsRef = collection(db, 'parts');
-          const q = query(partsRef, where('designation', '==', part.designation));
-          const querySnapshot = await getDocs(q);
-
-          if (querySnapshot.empty) {
-            // Create new part
-            await addDoc(partsRef, {
-              designation: part.designation,
-              reference: part.reference,
-              supplier: part.supplier,
-              purchasePrice: part.purchasePrice,
-              history: [{
-                purchasePrice: part.purchasePrice,
-                supplier: part.supplier,
-                date: new Date().toISOString()
-              }],
-              replacementFrequency: part.interventionType === 'replacement' ? 1 : 0,
-              repairFrequency: part.interventionType === 'repair' ? 1 : 0,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            });
-          } else {
-            // Update existing part
-            const partDoc = querySnapshot.docs[0];
-            const partData = partDoc.data() as Part;
-            
-            await updatePart(partDoc.id, {
-              purchasePrice: part.purchasePrice,
-              supplier: part.supplier,
-              replacementFrequency: part.interventionType === 'replacement' 
-                ? (partData.replacementFrequency || 0) + 1 
-                : (partData.replacementFrequency || 0),
-              repairFrequency: part.interventionType === 'repair'
-                ? (partData.repairFrequency || 0) + 1
-                : (partData.repairFrequency || 0)
-            });
-          }
-        }
-      }
-      
-      const now = new Date().toISOString();
-
-      // Create base intervention data with required fields
-      const baseInterventionData = {
-        interventionNumber,
-        userId, // Always set the current user's ID
-        date: formData.date || now.split('T')[0],
-        emitter: formData.emitter || '',
-        status: formData.status || 'in_progress',
-        createdAt: formData.id ? formData.createdAt : now,
-        updatedAt: now
-      };
-
-      // Add optional fields if they exist in formData
-      const interventionData = {
-        ...baseInterventionData,
-        ...formData,
-        timeEntries: formData.timeEntries || [],
-        timeStats,
-        startTime: timeStats?.startTime || null,
-        endTime: timeStats?.endTime || null,
-        completedAt: formData.status === 'completed' ? now : null
-      };
-
-      // Remove any undefined values
-      Object.keys(interventionData).forEach(key => 
-        interventionData[key] === undefined && delete interventionData[key]
-      );
-
-      // Verify user has access if updating
-      if (formData.id) {
-        const docRef = doc(db, 'interventions', formData.id);
-        const docSnap = await getDoc(docRef);
-        
-        if (!docSnap.exists()) {
-          throw new Error('Intervention introuvable');
-        }
-        
-        const existingData = docSnap.data();
-        
-        // Vérifier si l'utilisateur est admin
-        const userRole = await getUserRole(userId);
-        
-        // Debug logs pour diagnostiquer le problème d'autorisation
-        console.log("Sauvegarde d'intervention - Informations d'accès:", {
-          interventionId: formData.id,
-          interventionUserId: existingData.userId,
-          currentUserId: userId,
-          userRole: userRole
-        });
-        
-        // Permettre l'accès si l'utilisateur est le créateur OU un admin
-        if (existingData.userId !== userId && userRole !== 'admin') {
-          console.error("Vérification d'accès échouée", {
-            interventionUserId: existingData.userId,
-            currentUserId: userId,
-            userRole: userRole
-          });
-          throw new Error('Vous n\'avez pas accès à cette intervention');
-        }
-        
-        // Préserver l'userId original pour maintenir la propriété
-        const preservedUserId = existingData.userId;
-        await updateDoc(docRef, {
-          ...interventionData,
-          userId: preservedUserId // Ne pas modifier l'userId original
-        });
-        return formData.id;
-      } else {
-        const docRef = await addDoc(collection(db, 'interventions'), interventionData);
-        return docRef.id;
-      }
-    } catch (error: any) {
-      console.warn(`Attempt ${4 - retries}/3 failed:`, error.message);
-      
-      if ((error.message.includes('offline') || error.code === 'unavailable') && retries > 1) {
-        await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; // Exponential backoff
-        retries--;
-        continue;
-      }
-      
-      throw new Error(error.message || 'Erreur lors de la sauvegarde de l\'intervention');
-    }
-  }
-  
-  throw new Error('Erreur lors de la sauvegarde de l\'intervention après plusieurs tentatives');
-};
-
-export const updateInterventionTime = async (interventionId: string, timeEntry: TimeEntry) => {
-  if (!interventionId) {
-    throw new Error('ID d\'intervention manquant');
-  }
-
-  try {
-    const interventionRef = doc(db, 'interventions', interventionId);
-    await updateDoc(interventionRef, {
-      timeEntries: arrayUnion({
-        ...timeEntry,
-        timestamp: new Date(timeEntry.timestamp).toISOString()
-      })
-    });
-  } catch (error: any) {
-    console.error('Error updating intervention time:', error);
-    throw new Error(error.message || 'Erreur lors de la mise à jour du temps d\'intervention');
-  }
-};
-
-export const getCompletedInterventions = async () => {
-  try {
-    const interventionsRef = collection(db, 'interventions');
-    // First try with the composite index
-    try {
-      const q = query(
-        interventionsRef,
-        where('status', '==', 'completed'),
-        orderBy('completedAt', 'desc')
-      );
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (indexError) {
-      // If composite index fails, fallback to simple query
-      console.warn('Composite index not available, falling back to simple query');
-      const q = query(
-        interventionsRef,
-        where('status', '==', 'completed')
-      );
-      const querySnapshot = await getDocs(q);
-      const results = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      // Sort in memory as fallback
-      return results.sort((a: any, b: any) => {
-        const dateA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
-        const dateB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
-        return dateB - dateA;
-      });
-    }
-  } catch (error: any) {
-    console.error('Error getting completed interventions:', error);
-    throw new Error(error.message || 'Erreur lors du chargement des interventions terminées');
-  }
-};
-
-export const formatDuration = (ms: number): string => {
-  const seconds = Math.floor((ms / 1000) % 60);
-  const minutes = Math.floor((ms / (1000 * 60)) % 60);
-  const hours = Math.floor(ms / (1000 * 60 * 60));
-
-  return `${hours.toString().padStart(2, '0')}:${minutes
-    .toString()
-    .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-};
-
-export const getUserInterventions = async (userId: string) => {
-  if (!userId) {
-    throw new Error('Vous devez être connecté pour accéder à vos interventions');
-  }
-
-  let retries = 3;
-  let delay = 1000;
-
-  while (retries > 0) {
-    try {
-      const interventionsRef = collection(db, 'interventions');
-      
-      // Vérifier si l'utilisateur est admin
-      const userRole = await getUserRole(userId);
-      
-      let q;
-      
-      if (userRole === 'admin') {
-        // Les administrateurs peuvent voir toutes les interventions en cours
-        q = query(
-          interventionsRef,
-          where('status', '==', 'in_progress')
-        );
-      } else {
-        // Les utilisateurs normaux ne voient que leurs propres interventions
-        q = query(
-          interventionsRef,
-          where('userId', '==', userId),
-          where('status', '==', 'in_progress')
-        );
-      }
-      
-      const querySnapshot = await getDocs(q);
-      const interventions = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      // Sort in memory
-      return interventions.sort((a: any, b: any) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateB - dateA;
-      });
-    } catch (error: any) {
-      console.warn(`Attempt ${4 - retries}/3 failed:`, error.message);
-      
-      if ((error.message.includes('offline') || error.code === 'unavailable') && retries > 1) {
-        await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; // Exponential backoff
-        retries--;
-        continue;
-      }
-      
-      throw new Error(error.message || 'Erreur lors du chargement de vos interventions');
-    }
-  }
-  
-  throw new Error('Erreur lors du chargement de vos interventions après plusieurs tentatives');
 };

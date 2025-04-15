@@ -17,6 +17,7 @@ import { Toaster } from 'react-hot-toast';
 import UserInterventionsList from './components/UserInterventionsList';
 import InterventionsListe from './components/InterventionListe';
 import CreateIntervention from './components/CreateIntervention';
+import CreateInterventionUpdated from './components/CreateInterventionupdated';
 
 function App() {
   const { user, loading, isAdmin } = useAuth();
@@ -90,7 +91,16 @@ function App() {
               element={
                 <ProtectedRoute>
                    <Navbar/>
-                  <CreateIntervention />
+                  <CreateInterventionUpdated />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/intervention/edit/:id"
+              element={
+                <ProtectedRoute>
+                   <Navbar/>
+                  <CreateInterventionUpdated />
                 </ProtectedRoute>
               }
             />
