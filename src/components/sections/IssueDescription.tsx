@@ -39,19 +39,6 @@ const IssueDescription: React.FC<IssueDescriptionProps> = ({ formData, onFormCha
             disabled={!isEditable}
           />
         </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Nom du technicien intervenant <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            value={formData.technicianName}
-            onChange={(e) => onFormChange({ ...formData, technicianName: e.target.value })}
-            className={inputClasses}
-            required
-            disabled={!isEditable}
-          />
-        </div>
       </div>
     </section>
   );

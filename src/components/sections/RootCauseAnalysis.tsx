@@ -36,14 +36,14 @@ const RootCauseAnalysis: React.FC<RootCauseAnalysisProps> = ({ formData, onFormC
     };
     onFormChange({
       ...formData,
-      rootCauseAnalysis: [...formData.rootCauseAnalysis, newAnalysis]
+      rootCauseAnalysis: formData.rootCauseAnalysis ? [...formData.rootCauseAnalysis, newAnalysis] : [newAnalysis]
     });
   };
 
   const handleRemoveAnalysis = (index: number) => {
     if (!isEditable) return;
 
-    const newAnalysis = formData.rootCauseAnalysis.filter((_: any, i: number) => i !== index);
+    const newAnalysis = formData.rootCauseAnalysis?.filter((_: any, i: number) => i !== index) || [];
     onFormChange({
       ...formData,
       rootCauseAnalysis: newAnalysis
@@ -90,6 +90,8 @@ const RootCauseAnalysis: React.FC<RootCauseAnalysisProps> = ({ formData, onFormC
 
   // Ensure each analysis has exactly 5 whys
   React.useEffect(() => {
+    if (!formData.rootCauseAnalysis) return;
+    
     const updatedAnalyses = formData.rootCauseAnalysis.map((analysis: RootCauseAnalysis) => {
       if (analysis.whys.length !== 5) {
         return {
@@ -136,7 +138,7 @@ const RootCauseAnalysis: React.FC<RootCauseAnalysisProps> = ({ formData, onFormC
       </div>
       
       <div className="space-y-6">
-        {formData.rootCauseAnalysis.map((analysis: RootCauseAnalysis, index: number) => (
+        {formData.rootCauseAnalysis && formData.rootCauseAnalysis.map((analysis: RootCauseAnalysis, index: number) => (
           <div key={index} className="border rounded-lg p-6">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-medium">

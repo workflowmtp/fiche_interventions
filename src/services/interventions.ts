@@ -200,13 +200,14 @@ export const getUserInterventions = async (userId: string): Promise<Intervention
 };
 
 /**
- * Récupère les interventions terminées (accessible par les administrateurs)
+ * Récupère les interventions soumises (accessible par les administrateurs)
  */
 export const getCompletedInterventions = async (): Promise<Intervention[]> => {
   try {
     const interventionsRef = collection(db, COLLECTION_INTERVENTIONS);
-    // On récupère toutes les interventions sans filtre particulier pour les admins
-    const snapshot = await getDocs(interventionsRef);
+    // On récupère uniquement les interventions avec le statut "submitted"
+    const q = query(interventionsRef, where('status', '==', 'submitted'));
+    const snapshot = await getDocs(q);
     
     const interventions: Intervention[] = [];
     
@@ -223,7 +224,7 @@ export const getCompletedInterventions = async (): Promise<Intervention[]> => {
       new Date(a.updatedAt || a.createdAt).getTime()
     );
   } catch (error) {
-    console.error('Error fetching completed interventions:', error);
+    console.error('Error fetching submitted interventions:', error);
     throw error;
   }
 };

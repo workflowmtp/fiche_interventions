@@ -299,8 +299,10 @@ const InterventionsListe: React.FC = () => {
         let data;
         
         if (isAdmin) {
-          // Admins peuvent voir toutes les interventions
+          // Admins peuvent voir uniquement les interventions soumises
           data = await getUserInterventions(user.uid);
+          // Filtrer pour ne garder que les interventions avec statut "submitted"
+          data = data.filter(intervention => intervention.status === 'submitted');
         } else {
           // Utilisateurs standard voient leurs interventions
           data = await getUserInterventions(user.uid);
@@ -549,7 +551,7 @@ const InterventionsListe: React.FC = () => {
                       <button
                         onClick={() => handleViewReport(intervention)}
                         className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-100 transition-colors"
-                        title="Voir le rapport"
+                        title="Intervention Report"
                       >
                         <FileText className="w-4 h-4" />
                       </button>

@@ -80,21 +80,20 @@ const ReplacedParts: React.FC<ReplacedPartsProps> = ({ formData, onFormChange, i
   const handleAddPart = () => {
     if (!isEditable) return;
 
+    const newPart = {
+      designation: '',
+      reference: '',
+      interventionType: '',
+      quantity: 0,
+      purchasePrice: 0,
+      supplier: '',
+      lastPurchasePrice: 0,
+      lastSupplier: ''
+    };
+
     onFormChange({
       ...formData,
-      replacedParts: [
-        ...formData.replacedParts,
-        {
-          designation: '',
-          reference: '',
-          interventionType: '',
-          quantity: 0,
-          purchasePrice: 0,
-          supplier: '',
-          lastPurchasePrice: 0,
-          lastSupplier: ''
-        }
-      ]
+      replacedParts: formData.replacedParts ? [...formData.replacedParts, newPart] : [newPart]
     });
   };
 
@@ -152,7 +151,7 @@ const ReplacedParts: React.FC<ReplacedPartsProps> = ({ formData, onFormChange, i
       </div>
 
       <div className="space-y-6">
-        {formData.replacedParts.map((part: any, index: number) => (
+        {formData.replacedParts && formData.replacedParts.map((part: any, index: number) => (
           <div key={index} className="border rounded-lg p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-medium">

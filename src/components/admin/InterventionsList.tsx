@@ -8,6 +8,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { Dialog, Transition } from '@headlessui/react';
 import PartsList from './PartsList';
 import MachinesList from './MachinesList';
+import InterventionReport from '../InterventionReport ';
 import toast from 'react-hot-toast';
 
 interface Intervention {
@@ -36,6 +37,8 @@ const InterventionsList = () => {
   const [filterMachine, setFilterMachine] = useState<string>('all');
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [selectedIntervention, setSelectedIntervention] = useState<Intervention | null>(null);
   const [exportPeriod, setExportPeriod] = useState<ExportPeriod>({
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0]
@@ -46,6 +49,7 @@ const InterventionsList = () => {
     supplier: '',
     purchasePrice: 0
   });
+  const [interventionReport, setInterventionReport] = useState<string>(''); // Ajout de l'état pour le rapport d'intervention
   
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -58,11 +62,13 @@ const InterventionsList = () => {
           getParts()
         ]);
         
-        // Ensure emitter is a string
-        const processedInterventions = interventionsData.map(intervention => ({
-          ...intervention,
-          emitter: typeof intervention.emitter === 'object' ? intervention.emitter.name : intervention.emitter
-        }));
+        // Ensure emitter is a string and filter to keep only "submitted" interventions
+        const processedInterventions = interventionsData
+          .filter(intervention => intervention.status === 'submitted')
+          .map(intervention => ({
+            ...intervention,
+            emitter: typeof intervention.emitter === 'object' ? intervention.emitter.name : intervention.emitter
+          }));
         
         setInterventions(processedInterventions);
         setParts(partsData);
@@ -310,16 +316,25 @@ const InterventionsList = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            intervention.status === 'completed' 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-yellow-100 text-yellow-800'
+                            intervention.status === 'submitted' 
+                              ? 'bg-purple-100 text-purple-800' 
+                              : intervention.status === 'completed'
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-yellow-100 text-yellow-800'
                           }`}>
-                            {intervention.status === 'completed' ? 'Terminée' : 'En cours'}
+                            {intervention.status === 'submitted' 
+                              ? 'Soumise' 
+                              : intervention.status === 'completed' 
+                                ? 'Terminée' 
+                                : 'En cours'}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <button
-                            onClick={() => navigate(`/interventions/${intervention.id}`)}
+                            onClick={() => {
+                              setSelectedIntervention(intervention);
+                              setIsReportModalOpen(true);
+                            }}
                             className="text-blue-600 hover:text-blue-900"
                           >
                             <FileText className="w-5 h-5" />
@@ -592,6 +607,24 @@ const InterventionsList = () => {
               </div>
             </Transition.Child>
           </div>
+        </Dialog>
+      </Transition.Root>
+
+      {/* Report Modal */}
+      
+      <Transition.Root show={isReportModalOpen} as={React.Fragment}>
+        <Dialog
+          as="div"
+          className="fixed inset-0 z-10 "
+          onClose={() => setIsReportModalOpen(false)}
+        >
+          {selectedIntervention && (
+                      <InterventionReport 
+                        intervention={selectedIntervention} 
+                        isOpen={isReportModalOpen} 
+                        onClose={() => setIsReportModalOpen(false)} 
+                      />
+                    )}
         </Dialog>
       </Transition.Root>
     </div>

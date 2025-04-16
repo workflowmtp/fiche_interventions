@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Plus, ChevronDown, ChevronUp, Check, X } from 'lucide-react';
 import { Dialog, Transition } from '@headlessui/react';
+import { useAuth } from '../../hooks/useAuth';
+import toast from 'react-hot-toast';
 
 interface FinalReportProps {
   formData: any;
@@ -12,12 +14,14 @@ interface Technician {
   name: string;
   validated: boolean;
   timestamp: string;
+  uid: string;
 }
 
 const FinalReport: React.FC<FinalReportProps> = ({ formData, onFormChange, isEditable }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTechnician, setNewTechnician] = useState('');
   const [expandedSection, setExpandedSection] = useState(true);
+  const { user } = useAuth();
 
   const handleAddTechnician = () => {
     if (!isEditable) return;
@@ -26,7 +30,8 @@ const FinalReport: React.FC<FinalReportProps> = ({ formData, onFormChange, isEdi
       const newSignature: Technician = {
         name: newTechnician,
         validated: false,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        uid: user.uid
       };
 
       onFormChange({
@@ -41,6 +46,12 @@ const FinalReport: React.FC<FinalReportProps> = ({ formData, onFormChange, isEdi
 
   const handleValidateSignature = (index: number) => {
     if (!isEditable) return;
+
+    const signature = formData.technicianSignatures[index];
+    if (!user || !signature.uid || signature.uid !== user.uid) {
+      toast.error('Vous ne pouvez valider que votre propre signature');
+      return;
+    }
 
     const updatedSignatures = formData.technicianSignatures.map((sig: Technician, i: number) => 
       i === index ? { ...sig, validated: !sig.validated } : sig
